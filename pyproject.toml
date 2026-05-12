@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mnem"
+version = "0.1.0"
+description = "Meta-CLI and suite hub for the mnem memory suite (yaams, cognitive-ledger, owa-piggy, owa-tools)"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.11"
+authors = [{ name = "Carl Joakim Damsleth" }]
+keywords = ["mnem", "memory", "cli", "agent"]
+classifiers = [
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: MacOS",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Environment :: Console",
+  "Development Status :: 4 - Beta",
+]
+dependencies = [
+  "click>=8.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/damsleth/mnem"
+Source = "https://github.com/damsleth/mnem"
+
+[project.scripts]
+mnem = "mnem.cli:main"
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=7",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["mnem*"]
