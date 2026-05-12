@@ -19,6 +19,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 from typing import Sequence
 
 from mnem.conventions import redact
@@ -30,6 +31,13 @@ def _stream_subprocess(argv: Sequence[str]) -> tuple[int, str, str]:
   """Run subprocess; forward stdout lines as they arrive; capture stderr.
 
   Returns (returncode, captured_stdout, captured_stderr).
+
+  Stderr is drained on a background thread so that a noisy child
+  (yaams ingest's tqdm progress, ledger sleep's status text, etc)
+  cannot fill the stderr pipe buffer and deadlock the child while
+  mnem is still pumping stdout. Without this, a child that writes
+  more than ~64KB to stderr before closing stdout will block
+  forever.
   """
   env = os.environ.copy()
   try:
@@ -43,17 +51,27 @@ def _stream_subprocess(argv: Sequence[str]) -> tuple[int, str, str]:
   except FileNotFoundError as exc:
     return 127, "", f"binary not on PATH: {exc}"
 
+  stderr_chunks: list[str] = []
+
+  def _drain_stderr() -> None:
+    if proc.stderr is None:
+      return
+    for chunk in proc.stderr:
+      stderr_chunks.append(chunk)
+
+  drain_thread = threading.Thread(target=_drain_stderr, daemon=True)
+  drain_thread.start()
+
   stdout_chunks: list[str] = []
   assert proc.stdout is not None
   for line in proc.stdout:
     sys.stdout.write(line)
     sys.stdout.flush()
     stdout_chunks.append(line)
-  stderr_text = ""
-  if proc.stderr is not None:
-    stderr_text = proc.stderr.read()
+
   proc.wait()
-  return proc.returncode, "".join(stdout_chunks), stderr_text
+  drain_thread.join()
+  return proc.returncode, "".join(stdout_chunks), "".join(stderr_chunks)
 
 
 def run(verb_args: Sequence[str], *, verbose: bool = False) -> int:
