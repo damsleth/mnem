@@ -157,11 +157,13 @@ Phase 2c conformance bump, every tool returns to independent cadence.
 
 ```
 mnem 0.1.0 requires:
-  yaams >= 0.2.0
-  cognitive-ledger >= 0.3.0
+  yaams >= 0.1.3
+  cognitive-ledger >= 0.2.3
   owa-piggy >= 0.9.0
-  owa-tools >= 0.2.0
+  owa-tools >= 0.1.2
 ```
+
+Source of truth: `src/mnem/_minimums.py`. Keep this block in sync; CI enforces.
 
 A breaking change in any underlying tool bumps that tool's major and
 `mnem` bumps its declared minimum on the next release; consumers see

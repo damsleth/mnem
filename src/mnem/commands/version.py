@@ -2,7 +2,10 @@
 
 Output class: data. The reserved-key contract bans a top-level
 ``ok`` field on success documents; this command emits
-``{tool, version, components: {...}}`` instead.
+``{tool, version, components: {...}, packages: {...}}`` instead.
+
+The set of probed binaries and their package minimums is derived from
+``mnem._minimums.PACKAGES`` so there is exactly one source of truth.
 """
 
 from __future__ import annotations
@@ -12,26 +15,18 @@ import sys
 from typing import TextIO
 
 from mnem import __version__
+from mnem._minimums import PACKAGES
 from mnem.failure import run_subprocess
 
 
-# Which binaries to probe and the formula minimum the mnem release
-# pins. (binary, formula_minimum_or_None)
-_PROBED = [
-  ("yaams", "0.1.2"),
-  ("ledger", "0.2.0"),
-  ("ledger-obsidian", "0.2.0"),
-  ("sheep", "0.2.0"),
-  ("owa-piggy", "0.9.0"),
-  ("owa", "0.1.1"),
-  ("owa-cal", "0.1.1"),
-  ("owa-mail", "0.1.1"),
-  ("owa-graph", "0.1.1"),
-  ("owa-doctor", "0.1.1"),
-  ("owa-people", "0.1.1"),
-  ("owa-sched", "0.1.1"),
-  ("owa-drive", "0.1.1"),
-]
+def _probed_binaries() -> list[tuple[str, str, str]]:
+  """Flatten PACKAGES to (binary, package, package_minimum) rows."""
+  rows: list[tuple[str, str, str]] = []
+  for pkg, info in PACKAGES.items():
+    minimum = info["minimum"]
+    for binary in info["binaries"]:
+      rows.append((binary, pkg, minimum))
+  return rows
 
 
 def _probe(binary: str) -> dict:
@@ -53,35 +48,44 @@ def _probe(binary: str) -> dict:
 
 def _data_doc() -> dict:
   components: dict[str, dict] = {}
-  for binary, minimum in _PROBED:
+  for binary, pkg, minimum in _probed_binaries():
     info = _probe(binary)
-    if minimum is not None:
-      info["minimum"] = minimum
+    info["minimum"] = minimum
+    info["package"] = pkg
     components[binary] = info
+
+  packages: dict[str, dict] = {}
+  for pkg, info in PACKAGES.items():
+    packages[pkg] = {
+      "minimum": info["minimum"],
+      "binaries": list(info["binaries"]),
+    }
+
   return {
     "tool": "mnem",
     "version": __version__,
     "components": components,
+    "packages": packages,
   }
 
 
 def run(as_json: bool, stream: TextIO | None = None) -> int:
-  if stream is None:
-    stream = sys.stdout
+  out: TextIO = stream if stream is not None else sys.stdout
   doc = _data_doc()
   if as_json:
-    stream.write(json.dumps(doc, ensure_ascii=False) + "\n")
-    stream.flush()
+    out.write(json.dumps(doc, ensure_ascii=False) + "\n")
+    out.flush()
     return 0
 
-  stream.write(f"mnem {doc['version']}\n")
-  stream.write("\nComponents:\n")
-  for binary, info in doc["components"].items():
-    if not info.get("installed"):
-      stream.write(f"  {binary:<18} (not installed)\n")
-      continue
-    minimum = info.get("minimum")
-    minimum_str = f" (>= {minimum})" if minimum else ""
-    stream.write(f"  {binary:<18} {info.get('version', '?')}{minimum_str}\n")
-  stream.flush()
+  out.write(f"mnem {doc['version']}\n")
+  out.write("\nPackages:\n")
+  for pkg, pkg_info in doc["packages"].items():
+    out.write(f"  {pkg} (>= {pkg_info['minimum']})\n")
+    for binary in pkg_info["binaries"]:
+      info = doc["components"].get(binary, {})
+      if not info.get("installed"):
+        out.write(f"    {binary:<18} (not installed)\n")
+        continue
+      out.write(f"    {binary:<18} {info.get('version', '?')}\n")
+  out.flush()
   return 0

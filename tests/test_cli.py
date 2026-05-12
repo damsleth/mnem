@@ -94,17 +94,29 @@ def test_version_subcommand_json_shape():
   assert payload["tool"] == "mnem"
   assert "ok" not in payload  # reserved-key
   assert "components" in payload
-  # Every probed binary must appear.
+  # Every probed binary must appear (components stays keyed by binary
+  # for backwards compatibility).
   assert "yaams" in payload["components"]
   assert "ledger" in payload["components"]
   assert "owa-piggy" in payload["components"]
+  # New top-level packages block exposes the per-package minimum + the
+  # binaries that ship inside each package.
+  assert "packages" in payload
+  assert "yaams" in payload["packages"]
+  assert "cognitive-ledger" in payload["packages"]
+  assert "owa-piggy" in payload["packages"]
+  assert "owa-tools" in payload["packages"]
+  for pkg, info in payload["packages"].items():
+    assert "minimum" in info, f"{pkg} missing minimum"
+    assert isinstance(info.get("binaries"), list), f"{pkg} binaries must be a list"
+    assert info["binaries"], f"{pkg} binaries must be non-empty"
 
 
 def test_version_subcommand_human():
   result = CliRunner().invoke(cli, ["version"])
   assert result.exit_code == 0
   assert "mnem" in result.output
-  assert "Components:" in result.output
+  assert "Packages:" in result.output
 
 
 # --- mnem doctor ----------------------------------------------------------

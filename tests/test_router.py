@@ -104,6 +104,42 @@ def test_drive_routes_to_owa_drive():
   assert rewritten == ["ls"]
 
 
+# --- ledger context (Plan 03 / review F6) ----------------------------------
+
+def test_bare_ledger_context_emits_format_json():
+  """Bare `ledger context` rejects --json; the route rewrites to
+  --format json and marks json_policy=none so passthrough doesn't
+  add anything."""
+  mapping, rewritten = lookup(["ledger", "context"])
+  assert mapping.binary == "ledger"
+  assert rewritten == ["context", "--format", "json"]
+  assert mapping.json_policy == "none"
+
+
+def test_bare_ledger_context_forwards_extra_args():
+  _, rewritten = lookup(["ledger", "context", "--scope", "today"])
+  assert rewritten == ["context", "--format", "json", "--scope", "today"]
+
+
+def test_ledger_context_build_uses_native_json_route():
+  mapping, rewritten = lookup(["ledger", "context", "build"])
+  assert mapping.binary == "ledger"
+  assert rewritten == ["context", "build"]
+  assert mapping.json_policy == "inject"
+
+
+def test_ledger_context_profiles_uses_native_json_route():
+  mapping, rewritten = lookup(["ledger", "context", "profiles"])
+  assert mapping.binary == "ledger"
+  assert rewritten == ["context", "profiles"]
+  assert mapping.json_policy == "inject"
+
+
+def test_ledger_context_build_with_args():
+  _, rewritten = lookup(["ledger", "context", "build", "--profile", "boot"])
+  assert rewritten == ["context", "build", "--profile", "boot"]
+
+
 def test_longest_prefix_match_wins():
   # `mnem promote review` should beat any hypothetical `mnem
   # promote` mapping (today there's no bare `promote`, but the

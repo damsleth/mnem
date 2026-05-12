@@ -27,7 +27,11 @@ from mnem.failure import log_path, one_line_summary, parse_stdout, write_error_l
 from mnem.router import lookup
 
 
-def _stream_subprocess(argv: Sequence[str]) -> tuple[int, str, str]:
+def _stream_subprocess(
+  argv: Sequence[str],
+  *,
+  extra_env: dict[str, str] | None = None,
+) -> tuple[int, str, str]:
   """Run subprocess; forward stdout lines as they arrive; capture stderr.
 
   Returns (returncode, captured_stdout, captured_stderr).
@@ -40,6 +44,8 @@ def _stream_subprocess(argv: Sequence[str]) -> tuple[int, str, str]:
   forever.
   """
   env = os.environ.copy()
+  if extra_env:
+    env.update(extra_env)
   try:
     proc = subprocess.Popen(
       list(argv),
@@ -89,8 +95,20 @@ def _run_interactive(argv: Sequence[str]) -> int:
   return proc.returncode
 
 
-def run(verb_args: Sequence[str], *, verbose: bool = False) -> int:
-  """Dispatch ``mnem <verb-args>`` through the translation table."""
+def run(
+  verb_args: Sequence[str],
+  *,
+  verbose: bool = False,
+  top_level_json: bool = False,
+  extra_env: dict[str, str] | None = None,
+) -> int:
+  """Dispatch ``mnem <verb-args>`` through the translation table.
+
+  ``top_level_json`` is the value of ``mnem --json <verb>`` and
+  propagates as intent, not as a flag rewrite. Per CONVENTIONS.md
+  interactive commands reject --json; we enforce that at the mnem
+  layer rather than letting the child fail mysteriously.
+  """
   resolved = lookup(verb_args)
   if resolved is None:
     sys.stderr.write(
@@ -103,15 +121,22 @@ def run(verb_args: Sequence[str], *, verbose: bool = False) -> int:
   argv = [mapping.binary, *rewritten]
 
   if mapping.interactive:
+    if top_level_json:
+      verb_str = " ".join(verb_args)
+      sys.stderr.write(
+        f"x mnem: interactive command rejects --json: {verb_str}\n"
+        f"    Fix:  drop the top-level --json flag, or run a non-interactive verb\n"
+      )
+      return 2  # EXIT_USAGE per CONVENTIONS.md
     # No --json injection, no stdio capture. CONVENTIONS.md: interactive
     # commands reject --json; injecting it here would force the
     # underlying tool to exit 1 every time.
     return _run_interactive(argv)
 
-  if "--json" not in argv:
+  if mapping.json_policy == "inject" and "--json" not in argv:
     argv.append("--json")
 
-  rc, stdout_text, stderr_text = _stream_subprocess(argv)
+  rc, stdout_text, stderr_text = _stream_subprocess(argv, extra_env=extra_env)
 
   envelope = parse_stdout(stdout_text)
   crashed = envelope is None and rc != 0

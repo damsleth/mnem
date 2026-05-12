@@ -63,9 +63,27 @@ def test_ensure_config_bypasses_when_yaams_config_env_set(monkeypatch, tmp_path:
   assert _ensure_config(("ingest",)) is None
 
 
-def test_ensure_config_bypasses_when_ledger_config_env_set(monkeypatch, tmp_path: Path):
+def test_ensure_config_does_not_bypass_for_unrelated_env_vars(monkeypatch, tmp_path: Path):
+  """LEDGER_CONFIG / OWA_CONFIG / OWA_PIGGY_CONFIG are unrelated to
+  YAAMS-backed verbs. Setting them must NOT skip the first-run hint
+  (Plan 02 / review F3). Pre-Plan-02 mnem would bypass on any of
+  these and let the user crash on the missing yaams config one
+  layer down."""
   monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
-  monkeypatch.setenv("LEDGER_CONFIG", "/elsewhere/cfg.yaml")
+  monkeypatch.delenv("YAAMS_CONFIG", raising=False)
+  monkeypatch.delenv("MNEM_CONFIG", raising=False)
+  for var in ("LEDGER_CONFIG", "OWA_CONFIG", "OWA_PIGGY_CONFIG"):
+    monkeypatch.setenv(var, "/elsewhere/cfg.yaml")
+    assert _ensure_config(("query",)) == 4, var
+    assert _ensure_config(("ingest",)) == 4, var
+    monkeypatch.delenv(var, raising=False)
+
+
+def test_ensure_config_bypasses_when_mnem_config_env_set(monkeypatch, tmp_path: Path):
+  """MNEM_CONFIG is the suite-wide override; it should still bypass."""
+  monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+  monkeypatch.delenv("YAAMS_CONFIG", raising=False)
+  monkeypatch.setenv("MNEM_CONFIG", "/elsewhere/cfg.yaml")
   assert _ensure_config(("query",)) is None
 
 

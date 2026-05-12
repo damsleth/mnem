@@ -60,11 +60,21 @@ def _explicit_config_in_args(args: tuple[str, ...]) -> bool:
   )
 
 
-# Env vars that bypass the first-run guard. Per CONVENTIONS.md the
-# direct-CLI / mnem parity invariant requires `YAAMS_CONFIG` (and
-# friends) to resolve the same config in both invocation paths; mnem
-# must defer to them when set even if its own config doesn't exist.
-_CONFIG_ENV_VARS = ("YAAMS_CONFIG", "LEDGER_CONFIG", "OWA_CONFIG", "OWA_PIGGY_CONFIG", "MNEM_CONFIG")
+# Env vars that bypass the first-run guard, scoped to the verb that
+# actually reads them. Per CONVENTIONS.md the direct-CLI / mnem parity
+# invariant requires `YAAMS_CONFIG` (and friends) to resolve the same
+# config in both invocation paths; mnem must defer to them when set.
+# But every verb in _VERBS_NEEDING_CONFIG today is YAAMS-backed, so
+# only YAAMS_CONFIG (or the suite-wide MNEM_CONFIG override) should
+# count - having LEDGER_CONFIG or OWA_CONFIG set is unrelated and
+# previously caused users to skip past the helpful "Run: mnem init"
+# hint and crash on the missing yaams config one layer down.
+_BYPASS_ENV_BY_VERB: dict[tuple[str, ...], tuple[str, ...]] = {
+  ("query",): ("YAAMS_CONFIG", "MNEM_CONFIG"),
+  ("ingest",): ("YAAMS_CONFIG", "MNEM_CONFIG"),
+  ("promote", "review"): ("YAAMS_CONFIG", "MNEM_CONFIG"),
+  ("promote", "generate"): ("YAAMS_CONFIG", "MNEM_CONFIG"),
+}
 
 
 def _ensure_config(verb_args: tuple[str, ...]) -> int | None:
@@ -72,14 +82,17 @@ def _ensure_config(verb_args: tuple[str, ...]) -> int | None:
   bail with a first-run hint."""
   if not verb_args:
     return None
+  matched_prefix: tuple[str, ...] | None = None
   for prefix in _VERBS_NEEDING_CONFIG:
     if tuple(verb_args[: len(prefix)]) == prefix:
+      matched_prefix = prefix
       break
-  else:
+  if matched_prefix is None:
     return None
   if _explicit_config_in_args(verb_args):
     return None
-  if any(os.environ.get(name) for name in _CONFIG_ENV_VARS):
+  bypass_vars = _BYPASS_ENV_BY_VERB.get(matched_prefix, ())
+  if any(os.environ.get(name) for name in bypass_vars):
     return None
   cfg = _yaams_config_path()
   if cfg.is_file():
@@ -184,6 +197,40 @@ def init_cmd(ctx: click.Context, as_json: bool, force: bool) -> None:
   ctx.exit(run(as_json or ctx.obj.get("json", False), force=force))
 
 
+def _yaams_config_env(full: tuple[str, ...]) -> dict[str, str]:
+  """Return ``{"YAAMS_CONFIG": <mnem yaams config path>}`` when mnem
+  should hand its yaams config to the child via env, else ``{}``.
+
+  Plan 05 Part B / review F2: ``mnem init`` writes
+  ``$XDG_CONFIG_HOME/mnem/yaams/config.yaml`` but YAAMS resolution may
+  not yet include that path on older yaams builds. To keep first-day
+  flow working regardless, mnem injects ``YAAMS_CONFIG`` for
+  yaams-backed routes when:
+
+  - the head verb routes to yaams, AND
+  - the user did not set ``YAAMS_CONFIG`` themselves, AND
+  - the user did not pass ``--config`` explicitly, AND
+  - mnem's yaams config file exists on disk.
+
+  Never overrides a user-set ``YAAMS_CONFIG``.
+  """
+  from mnem.router import lookup
+  resolved = lookup(list(full))
+  if resolved is None:
+    return {}
+  mapping, _ = resolved
+  if mapping.binary != "yaams":
+    return {}
+  if os.environ.get("YAAMS_CONFIG"):
+    return {}
+  if _explicit_config_in_args(full):
+    return {}
+  cfg = _yaams_config_path()
+  if not cfg.is_file():
+    return {}
+  return {"YAAMS_CONFIG": str(cfg)}
+
+
 def _make_passthrough(name: str, head: tuple[str, ...]):
   """Generate a Click subcommand that forwards to the passthrough
   module after the first-run hint check."""
@@ -200,7 +247,12 @@ def _make_passthrough(name: str, head: tuple[str, ...]):
     if hint is not None:
       ctx.exit(hint)
     from mnem.commands.passthrough import run
-    ctx.exit(run(list(full), verbose=ctx.obj.get("verbose", False)))
+    ctx.exit(run(
+      list(full),
+      verbose=ctx.obj.get("verbose", False),
+      top_level_json=ctx.obj.get("json", False),
+      extra_env=_yaams_config_env(full) or None,
+    ))
 
   _cmd.__doc__ = f"Run `mnem {name}` against the suite."
   return _cmd

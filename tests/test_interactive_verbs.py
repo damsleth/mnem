@@ -78,7 +78,7 @@ def test_non_interactive_run_still_uses_stream_subprocess(monkeypatch, tmp_path:
   rotation all depend on it)."""
   stream_called = {"flag": False, "argv": []}
 
-  def _fake_stream(argv):
+  def _fake_stream(argv, **_kwargs):
     stream_called["flag"] = True
     stream_called["argv"] = list(argv)
     # Return a clean envelope to skip the failure path.

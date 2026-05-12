@@ -12,10 +12,25 @@ the command modules rather than the table.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Sequence
+from typing import Callable, Literal, Sequence
 
 
 _LEDGER_SOURCE_ID = "tier2_ledger"
+
+
+# JSON injection policy per row.
+#
+# - "inject": append --json to argv if not already present. Used for
+#   tools that expect an explicit machine-mode flag (yaams, ledger).
+# - "native": underlying tool emits JSON by default; --json is either
+#   unknown or only accepted at the top level. The OWA tools fit here:
+#   `owa-mail config --json` rejects --json as an unknown flag. Don't
+#   inject.
+# - "none": never inject. Used for interactive children (the
+#   interactive=True flag also gates stdio capture) and for rewrites
+#   that produce the final argv shape themselves (e.g. bare
+#   `ledger context` -> `--format json`).
+JsonPolicy = Literal["inject", "native", "none"]
 
 
 @dataclass(frozen=True)
@@ -29,6 +44,9 @@ class Mapping:
   # CONVENTIONS.md) and must NOT capture stdio - the child needs the
   # real terminal so prompts and TTY tricks work.
   interactive: bool = False
+  # See JsonPolicy above. Default "inject" preserves the historical
+  # passthrough behavior for yaams/ledger.
+  json_policy: JsonPolicy = "inject"
 
 
 def _passthrough(extra: Sequence[str] = ()) -> Callable[[Sequence[str]], list[str]]:
@@ -112,63 +130,97 @@ TABLE: dict[tuple[str, ...], Mapping] = {
     rewrite=_passthrough(["notes"]),
     description="List ledger notes by type",
   ),
+  # Bare `ledger context` exposes --format boot|identity|json (not
+  # --json) at the cognitive-ledger layer. We translate to
+  # `context --format json` and mark json_policy=none so passthrough
+  # does not append --json on top. Subcommands `context build` and
+  # `context profiles` use their own --json natively, so they live on
+  # separate rows with the default inject policy. Longest-prefix
+  # match in `lookup()` ensures the 3-tuple keys resolve first.
   ("ledger", "context"): Mapping(
     binary="ledger",
-    rewrite=_passthrough(["context"]),
-    description="Output boot context or build context files",
+    rewrite=lambda a: ["context", "--format", "json", *list(a)],
+    description="Output boot context (JSON)",
+    json_policy="none",
+  ),
+  ("ledger", "context", "build"): Mapping(
+    binary="ledger",
+    rewrite=_passthrough(["context", "build"]),
+    description="Build curated context files",
+  ),
+  ("ledger", "context", "profiles"): Mapping(
+    binary="ledger",
+    rewrite=_passthrough(["context", "profiles"]),
+    description="List ledger context profiles",
   ),
   # --- owa-piggy (auth) -----------------------------------------------
+  # owa-piggy is JSON-by-default like the rest of the OWA suite, so we
+  # do not inject --json. The shared run_with_output_modes() layer
+  # only consumes --json for the top-level --doctor probe.
   ("auth", "status"): Mapping(
     binary="owa-piggy",
     rewrite=_passthrough(["status"]),
     description="Show M365 auth status (all profiles)",
+    json_policy="native",
   ),
   ("auth", "setup"): Mapping(
     binary="owa-piggy",
     rewrite=_passthrough(["setup"]),
     description="Interactive first-time M365 auth setup",
     interactive=True,
+    json_policy="none",
   ),
   ("auth", "reseed"): Mapping(
     binary="owa-piggy",
     rewrite=_passthrough(["reseed"]),
     description="Refresh expired tokens from the Edge sidecar",
+    json_policy="native",
   ),
   ("auth", "profiles"): Mapping(
     binary="owa-piggy",
     rewrite=_passthrough(["profiles"]),
     description="List / manage M365 profiles",
+    json_policy="native",
   ),
   # --- owa-tools (M365 read/write) ------------------------------------
+  # OWA tools emit JSON by default; their subcommand parsers reject
+  # --json as an unknown flag. json_policy="native" keeps the argv
+  # clean and unblocks mnem mail/calendar/graph/people/schedule/drive.
   ("mail",): Mapping(
     binary="owa-mail",
     rewrite=_passthrough([]),
     description="Outlook mail (messages, send, reply, search, ...)",
+    json_policy="native",
   ),
   ("calendar",): Mapping(
     binary="owa-cal",
     rewrite=_passthrough([]),
     description="Outlook calendar (events, create, update, ...)",
+    json_policy="native",
   ),
   ("graph",): Mapping(
     binary="owa-graph",
     rewrite=_passthrough([]),
     description="Generic Microsoft Graph CLI (GET/POST/PATCH/DELETE)",
+    json_policy="native",
   ),
   ("people",): Mapping(
     binary="owa-people",
     rewrite=_passthrough([]),
     description="People / directory lookup",
+    json_policy="native",
   ),
   ("schedule",): Mapping(
     binary="owa-sched",
     rewrite=_passthrough([]),
     description="Free/busy and find-time scheduling helpers",
+    json_policy="native",
   ),
   ("drive",): Mapping(
     binary="owa-drive",
     rewrite=_passthrough([]),
     description="OneDrive (ls, get, put, rm, ...)",
+    json_policy="native",
   ),
 }
 
