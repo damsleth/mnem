@@ -139,6 +139,44 @@ with `ok === false`, treat as error envelope; otherwise treat as
 data. Exit code agrees per the invariant - if the exit code is
 nonzero, expect an error envelope (or a crash with no JSON).
 
+## Stream routing
+
+**Rule**: structured JSON output - success documents, success
+envelopes, NDJSON streams, doctor payloads, AND failure envelopes -
+travels on **stdout**. Stderr carries free-text diagnostics only:
+human progress in default (non-`--json`) mode, captured tracebacks
+on crash, deprecation notes, log lines.
+
+The justification is consumer ergonomics across the suite:
+
+- **One stream, one parser.** Every JSON-aware caller does the
+  same thing: read stdout, parse the last JSON value (or the
+  terminal `{type:"result"}` line for streaming actions), branch
+  on the reserved `ok` key. No need to interleave stdout and
+  stderr, no precedence rules, no buffering races.
+- **Pipelines work.** `mnem mail messages --json | jq` handles
+  both success and failure because the envelope is in the pipe.
+  Stderr drains to the terminal regardless.
+- **Streaming stays coherent.** Action commands emit
+  `{type:"progress"}` lines on stdout and a terminal
+  `{type:"result", ok: true|false}` on stdout. If failures went to
+  stderr, a `tail`-style watcher on stdout would never see the
+  failure terminator.
+
+POSIX's "errors on stderr" tradition was written for unstructured
+human-readable error text - which is still where it belongs. Once
+the error becomes a structured machine-readable envelope, stream-
+splitting between success and failure paths creates a parsing
+nightmare. Modern JSON CLIs (`gh api`, `aws`, `kubectl -o json`,
+`terraform output -json`) all put errors in the response body on
+stdout, not on stderr; this contract follows that convention.
+
+**For tool authors**: if your tool has a house rule "errors go to
+stderr", that rule still applies to **free-text** errors. The
+contract here only governs **structured envelopes** - those go
+on stdout regardless of whether `ok` is `true` or `false`. Tracebacks,
+log lines, human messages stay on stderr.
+
 ## Exit codes
 
 | Code | Meaning |
