@@ -1,9 +1,9 @@
 # CONVENTIONS
 
-**Status**: draft (Phase 1). The per-command conformance table and
-sign-off land in Phase 2a; until then, every section below is open
-to change. Once signed, this document is the binding spec for every
-binary in the suite.
+**Status**: v1, signed off after the Phase 2a audit (2026-05-12).
+Per-command conformance table is appended at the bottom; the audit
+findings live in [AUDIT.md](AUDIT.md). This document is now the
+binding spec for every binary in the suite.
 
 This document defines the CLI contract that `yaams`, `ledger`,
 `ledger-obsidian`, `sheep`, `owa-piggy`, the eight `owa-*` tools, and
@@ -293,13 +293,236 @@ watermarks, and adapter code do not change. The CLI surface accepts
 No data migration. No watermark migration. CLI aliasing only. Anyone
 reading the SQLite directly sees the unchanged source id.
 
+## Per-command conformance table
+
+The signed-off mapping of every command in the suite to the contract
+above. Each row is a regression-test fixture target for Phase 2b/2c.
+
+Legend:
+- **Class**: `data`, `action`, `interactive`
+- **Modifiers**: `destructive` (or `-`)
+- **`-j` / `-p`**: required (`req`), partial (`partial` - works on
+  some subcommands only), missing (`miss`)
+- **Success stdout**: `raw` (data document) / `envelope` /
+  `ndjson+result` (streaming) / `human` (interactive only)
+- **Failure stdout**: `envelope` / `n/a` (interactive: stderr only)
+- **Stderr policy**: `clean` (progress/logs only, no secrets,
+  redacted) / `human` (interactive prompts)
+- **Exit codes**: subset of `{0,1,2,3,4,5}` the command can emit
+
+### `yaams`
+
+| Command | Class | Mods | `-j` | `-p` | Success stdout | Failure stdout | Stderr | Exit codes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `yaams --version` | data | - | req | req | raw `{tool,version}` | envelope | clean | 0,1 |
+| `yaams --doctor` | data | - | req | req | doctor JSON | envelope | clean | 0,1,2,3 |
+| `yaams version` | data | - | req | req | raw `{tool,version}` | envelope | clean | 0,1 |
+| `yaams setup` | action | - | req | req | envelope | envelope | clean | 0,1,2 |
+| `yaams init-db` | action | - | req | req | envelope | envelope | clean | 0,1 |
+| `yaams ingest` | action | - | req | req | ndjson+result | envelope | clean | 0,1,2,3,5 |
+| `yaams stats` | data | - | req | req | raw stats doc | envelope | clean | 0,1 |
+| `yaams reset-db` | action | destructive | req | req | envelope | envelope | clean | 0,1 |
+| `yaams query` | data | - | req | req | raw answer doc | envelope | clean | 0,1,2,4 |
+| `yaams feedback` | action | - | req | req | envelope | envelope | clean | 0,1,4 |
+| `yaams signals` | data | - | req | req | raw signals list | envelope | clean | 0,1 |
+| `yaams consolidate` | action | - | req | req | envelope | envelope | clean | 0,1,2 |
+| `yaams promote generate` | action | - | req | req | envelope | envelope | clean | 0,1,2 |
+| `yaams promote list` | data | - | req | req | raw candidate list | envelope | clean | 0,1 |
+| `yaams promote review` | interactive | - | reject | n/a | human | n/a | human | 0,1 |
+| `yaams entities list` | data | - | req | req | raw entity list | envelope | clean | 0,1 |
+| `yaams entities add` | action | - | req | req | envelope | envelope | clean | 0,1 |
+| `yaams entities remove` | action | destructive | req | req | envelope | envelope | clean | 0,1 |
+| `yaams entities discover` | action | - | req | req | envelope | envelope | clean | 0,1,2 |
+| `yaams entities denied` | data | - | req | req | raw list | envelope | clean | 0,1 |
+| `yaams entities manage` | interactive | - | reject | n/a | human | n/a | human | 0,1 |
+| `yaams enrich retag` | action | - | req | req | envelope | envelope | clean | 0,1,2 |
+
+### `ledger`
+
+| Command | Class | Mods | `-j` | `-p` | Success stdout | Failure stdout | Stderr | Exit codes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `ledger --version` | data | - | req | req | raw | envelope | clean | 0,1 |
+| `ledger --doctor` | data | - | req | req | doctor JSON | envelope | clean | 0,1,2,3 |
+| `ledger init` | action | - | req | req | envelope | envelope | clean | 0,1 |
+| `ledger paths` | data | - | req | req | raw paths doc | envelope | clean | 0,1 |
+| `ledger loops` | data | - | req | req | raw list | envelope | clean | 0,1 |
+| `ledger notes` | data | - | req | req | raw list | envelope | clean | 0,1 |
+| `ledger query` | data | - | req | req | raw ranked list | envelope | clean | 0,1,4 |
+| `ledger discover` | data | - | req | req | raw discovery doc | envelope | clean | 0,1 |
+| `ledger embed build` | action | - | req | req | ndjson+result | envelope | clean | 0,1,2 |
+| `ledger embed status` | data | - | req | req | raw status doc | envelope | clean | 0,1 |
+| `ledger embed clean` | action | destructive | req | req | envelope | envelope | clean | 0,1 |
+| `ledger eval` | action | - | req | req | envelope | envelope | clean | 0,1 |
+| `ledger context build` | action | - | req | req | envelope | envelope | clean | 0,1 |
+| `ledger context profiles` | action | - | req | req | envelope | envelope | clean | 0,1 |
+| `ledger ingest` | action | - | req | req | ndjson+result | envelope | clean | 0,1,2,5 |
+
+### `ledger-obsidian`
+
+| Command | Class | Mods | `-j` | `-p` | Success stdout | Failure stdout | Stderr | Exit codes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `ledger-obsidian --version` | data | - | req | req | raw | envelope | clean | 0,1 |
+| `ledger-obsidian --doctor` | data | - | req | req | doctor JSON | envelope | clean | 0,1,2,3 |
+| `ledger-obsidian sync` | action | - | req | req | envelope | envelope | clean | 0,1,2 |
+
+### `sheep`
+
+| Command | Class | Mods | `-j` | `-p` | Success stdout | Failure stdout | Stderr | Exit codes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `sheep --version` | data | - | req | req | raw | envelope | clean | 0,1 |
+| `sheep --doctor` | data | - | req | req | doctor JSON | envelope | clean | 0,1,2 |
+| `sheep status` | data | - | req | req | raw status doc | envelope | clean | 0,1 |
+| `sheep lint` | data | - | req | req | raw findings list | envelope | clean | 0,1 |
+| `sheep index` | action | - | req | req | envelope | envelope | clean | 0,1,2 |
+| `sheep sleep` | data | - | req | req | raw checklist | envelope | clean | 0,1 |
+| `sheep sync` | data | - | req | req | raw diff doc | envelope | clean | 0,1 |
+
+### `owa-piggy`
+
+| Command | Class | Mods | `-j` | `-p` | Success stdout | Failure stdout | Stderr | Exit codes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `owa-piggy --version` | data | - | req | req | raw | envelope | clean | 0,1 |
+| `owa-piggy --doctor` | data | - | req | req | doctor JSON | envelope | clean | 0,1,2,3 |
+| `owa-piggy token` | data | - | req | req | raw token doc | envelope | clean | 0,1,3 |
+| `owa-piggy status` | data | - | req | req | raw status doc | envelope | clean | 0,1,3 |
+| `owa-piggy debug` | data | - | req | req | raw diagnostics doc | envelope | clean | 0,1,3 |
+| `owa-piggy decode` | data | - | req | req | raw JWT parts | envelope | clean | 0,1 |
+| `owa-piggy remaining` | data | - | req | req | raw `{minutes}` | envelope | clean | 0,1,3 |
+| `owa-piggy setup` | interactive | - | reject | n/a | human | n/a | human | 0,1,3 |
+| `owa-piggy reseed` | action | - | req | req | envelope | envelope | clean | 0,1,2,3 |
+| `owa-piggy version` | data | - | req | req | raw | envelope | clean | 0,1 |
+| `owa-piggy profiles list` | data | - | req | req | raw list | envelope | clean | 0,1 |
+| `owa-piggy profiles set-default` | action | - | req | req | envelope | envelope | clean | 0,1 |
+| `owa-piggy profiles delete` | action | destructive | req | req | envelope | envelope | clean | 0,1 |
+
+### `owa-doctor`
+
+| Command | Class | Mods | `-j` | `-p` | Success stdout | Failure stdout | Stderr | Exit codes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `owa-doctor` | data | - | req | req | doctor JSON (aggregated) | envelope | clean | 0,1,2,3 |
+| `owa-doctor --version` | data | - | req | req | raw | envelope | clean | 0,1 |
+
+### `owa-cal`
+
+| Command | Class | Mods | `-j` | `-p` | Success stdout | Failure stdout | Stderr | Exit codes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `owa-cal --version` | data | - | req | req | raw | envelope | clean | 0,1 |
+| `owa-cal --doctor` | data | - | req | req | doctor JSON | envelope | clean | 0,1,2,3 |
+| `owa-cal events` | data | - | req | req | raw event list | envelope | clean | 0,1,2,3 |
+| `owa-cal events-webcal` | data | - | req | req | raw webcal doc | envelope | clean | 0,1,2 |
+| `owa-cal create` | action | - | req | req | envelope | envelope | clean | 0,1,2,3 |
+| `owa-cal update` | action | - | req | req | envelope | envelope | clean | 0,1,2,3,4 |
+| `owa-cal delete` | action | destructive | req | req | envelope | envelope | clean | 0,1,2,3,4 |
+| `owa-cal categories` | data | - | req | req | raw category list | envelope | clean | 0,1,2,3 |
+| `owa-cal config` | data | - | req | req | raw config doc | envelope | clean | 0,1 |
+| `owa-cal refresh` | action | - | req | req | envelope | envelope | clean | 0,1,3 |
+| `owa-cal profiles` | data | - | req | req | raw list | envelope | clean | 0,1 |
+
+### `owa-mail`
+
+| Command | Class | Mods | `-j` | `-p` | Success stdout | Failure stdout | Stderr | Exit codes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `owa-mail --version` | data | - | req | req | raw | envelope | clean | 0,1 |
+| `owa-mail --doctor` | data | - | req | req | doctor JSON | envelope | clean | 0,1,2,3 |
+| `owa-mail messages` | data | - | req | req | raw message list | envelope | clean | 0,1,2,3 |
+| `owa-mail show` | data | - | req | req | raw message doc | envelope | clean | 0,1,2,3,4 |
+| `owa-mail send` | action | - | req | req | envelope | envelope | clean | 0,1,2,3 |
+| `owa-mail reply` | action | - | req | req | envelope | envelope | clean | 0,1,2,3,4 |
+| `owa-mail reply-all` | action | - | req | req | envelope | envelope | clean | 0,1,2,3,4 |
+| `owa-mail forward` | action | - | req | req | envelope | envelope | clean | 0,1,2,3,4 |
+| `owa-mail delete` | action | destructive | req | req | envelope | envelope | clean | 0,1,2,3,4 |
+| `owa-mail move` | action | - | req | req | envelope | envelope | clean | 0,1,2,3,4 |
+| `owa-mail mark` | action | - | req | req | envelope | envelope | clean | 0,1,2,3,4 |
+| `owa-mail folders` | data | - | req | req | raw folder list | envelope | clean | 0,1,2,3 |
+| `owa-mail config` | data | - | req | req | raw config doc | envelope | clean | 0,1 |
+| `owa-mail refresh` | action | - | req | req | envelope | envelope | clean | 0,1,3 |
+
+### `owa-graph`
+
+| Command | Class | Mods | `-j` | `-p` | Success stdout | Failure stdout | Stderr | Exit codes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `owa-graph --version` | data | - | req | req | raw | envelope | clean | 0,1 |
+| `owa-graph --doctor` | data | - | req | req | doctor JSON | envelope | clean | 0,1,2,3 |
+| `owa-graph get` | data | - | req | req | raw response | envelope | clean | 0,1,2,3,4 |
+| `owa-graph post` | action | - | req | req | envelope | envelope | clean | 0,1,2,3 |
+| `owa-graph put` | action | - | req | req | envelope | envelope | clean | 0,1,2,3 |
+| `owa-graph patch` | action | - | req | req | envelope | envelope | clean | 0,1,2,3 |
+| `owa-graph delete` | action | destructive | req | req | envelope | envelope | clean | 0,1,2,3,4 |
+| `owa-graph batch` | action | - | req | req | envelope | envelope | clean | 0,1,2,3,5 |
+| `owa-graph config` | data | - | req | req | raw config doc | envelope | clean | 0,1 |
+| `owa-graph refresh` | action | - | req | req | envelope | envelope | clean | 0,1,3 |
+
+### `owa-people`
+
+| Command | Class | Mods | `-j` | `-p` | Success stdout | Failure stdout | Stderr | Exit codes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `owa-people --version` | data | - | req | req | raw | envelope | clean | 0,1 |
+| `owa-people --doctor` | data | - | req | req | doctor JSON | envelope | clean | 0,1,2,3 |
+| `owa-people find` | data | - | req | req | raw list | envelope | clean | 0,1,2,3 |
+| `owa-people directory` | data | - | req | req | raw list | envelope | clean | 0,1,2,3 |
+| `owa-people show` | data | - | req | req | raw record | envelope | clean | 0,1,2,3,4 |
+| `owa-people me` | data | - | req | req | raw record | envelope | clean | 0,1,3 |
+| `owa-people contacts` | data | - | req | req | raw list | envelope | clean | 0,1,2,3 |
+| `owa-people config` | data | - | req | req | raw config doc | envelope | clean | 0,1 |
+| `owa-people refresh` | action | - | req | req | envelope | envelope | clean | 0,1,3 |
+
+### `owa-sched`
+
+| Command | Class | Mods | `-j` | `-p` | Success stdout | Failure stdout | Stderr | Exit codes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `owa-sched --version` | data | - | req | req | raw | envelope | clean | 0,1 |
+| `owa-sched --doctor` | data | - | req | req | doctor JSON | envelope | clean | 0,1,2,3 |
+| `owa-sched availability` | data | - | req | req | raw availability doc | envelope | clean | 0,1,2,3 |
+| `owa-sched find-time` | data | - | req | req | raw slot list | envelope | clean | 0,1,2,3 |
+| `owa-sched config` | data | - | req | req | raw config doc | envelope | clean | 0,1 |
+| `owa-sched refresh` | action | - | req | req | envelope | envelope | clean | 0,1,3 |
+
+### `owa-drive`
+
+| Command | Class | Mods | `-j` | `-p` | Success stdout | Failure stdout | Stderr | Exit codes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `owa-drive --version` | data | - | req | req | raw | envelope | clean | 0,1 |
+| `owa-drive --doctor` | data | - | req | req | doctor JSON | envelope | clean | 0,1,2,3 |
+| `owa-drive ls` | data | - | req | req | raw entry list | envelope | clean | 0,1,2,3,4 |
+| `owa-drive show` | data | - | req | req | raw entry record | envelope | clean | 0,1,2,3,4 |
+| `owa-drive get` | action | - | req | req | envelope | envelope | clean | 0,1,2,3,4 |
+| `owa-drive put` | action | - | req | req | envelope | envelope | clean | 0,1,2,3 |
+| `owa-drive rm` | action | destructive | req | req | envelope | envelope | clean | 0,1,2,3,4 |
+| `owa-drive config` | data | - | req | req | raw config doc | envelope | clean | 0,1 |
+| `owa-drive refresh` | action | - | req | req | envelope | envelope | clean | 0,1,3 |
+
+### `owa` (dispatcher)
+
+`owa` is a passthrough dispatcher that routes `owa <tool> <args...>`
+to the named `owa-<tool>` binary. It MUST itself implement
+`--version` and `--doctor` per the data-class spec. All other
+behavior is inherited from the dispatched binary.
+
+### `mnem`
+
+Defined here for completeness; lands in Phase 3a/3b.
+
+| Command | Class | Mods | `-j` | `-p` | Success stdout | Failure stdout | Stderr | Exit codes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `mnem --version` | data | - | req | req | raw `{tool,version,observed[]}` | envelope | clean | 0,1 |
+| `mnem hello` | data | - | req | req | raw `{verbs[],examples[]}` | envelope | clean | 0,1 |
+| `mnem doctor` | data | - | req | req | doctor JSON (aggregated) | envelope | clean | 0,1,2,3 |
+| `mnem version` | data | - | req | req | raw `{tool,version,observed[]}` | envelope | clean | 0,1 |
+| `mnem init` | interactive | - | reject | n/a | human | n/a | human | 0,1 |
+| `mnem query` | data | - | req | req | raw answer doc | envelope | clean | 0,1,2,3,4 |
+| `mnem ingest` | action | - | req | req | ndjson+result | envelope | clean | 0,1,2,3,5 |
+| `mnem promote review` | interactive | - | reject | n/a | human | n/a | human | 0,1 |
+| `mnem ledger ...` | (inherits from `ledger` subcommand) |
+| `mnem mail ...` | (inherits from `owa-mail` subcommand) |
+| `mnem calendar ...` | (inherits from `owa-cal` subcommand) |
+| `mnem auth ...` | (inherits from `owa-piggy` subcommand) |
+
 ## Status
 
-Phase 1: this draft published.
+Phase 1: draft published.
 
-Phase 2a: per-command conformance table added; signed off; binary
-audit complete with one filed issue per conformance gap in each
-repo.
+Phase 2a: signed off, table above is binding. Audit results in
+[AUDIT.md](AUDIT.md).
 
 Phase 2b/2c: tools migrate to conformance.
 
