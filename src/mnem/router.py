@@ -24,6 +24,11 @@ class Mapping:
   binary: str  # underlying binary name (e.g. "yaams")
   rewrite: Callable[[Sequence[str]], list[str]]  # mnem-args -> underlying-args
   description: str  # one-line summary for `mnem hello`
+  # Interactive verbs prompt the human directly. mnem must NOT inject
+  # --json into their argv (the underlying tool will reject it per
+  # CONVENTIONS.md) and must NOT capture stdio - the child needs the
+  # real terminal so prompts and TTY tricks work.
+  interactive: bool = False
 
 
 def _passthrough(extra: Sequence[str] = ()) -> Callable[[Sequence[str]], list[str]]:
@@ -65,6 +70,7 @@ TABLE: dict[tuple[str, ...], Mapping] = {
     binary="yaams",
     rewrite=_passthrough(["promote", "review"]),
     description="Review promotion candidates interactively",
+    interactive=True,
   ),
   ("promote", "generate"): Mapping(
     binary="yaams",
@@ -117,6 +123,7 @@ TABLE: dict[tuple[str, ...], Mapping] = {
     binary="owa-piggy",
     rewrite=_passthrough(["setup"]),
     description="Interactive first-time M365 auth setup",
+    interactive=True,
   ),
   ("auth", "reseed"): Mapping(
     binary="owa-piggy",

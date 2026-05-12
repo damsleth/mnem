@@ -74,6 +74,21 @@ def _stream_subprocess(argv: Sequence[str]) -> tuple[int, str, str]:
   return proc.returncode, "".join(stdout_chunks), "".join(stderr_chunks)
 
 
+def _run_interactive(argv: Sequence[str]) -> int:
+  """Run an interactive child with the real terminal attached.
+
+  No --json injection, no stdio capture - the child needs the TTY so
+  click.prompt / questionary / raw-mode tricks work. We pass stdin /
+  stdout / stderr through verbatim and just propagate the exit code.
+  """
+  try:
+    proc = subprocess.run(list(argv), check=False)
+  except FileNotFoundError as exc:
+    sys.stderr.write(f"x mnem: binary not on PATH: {exc}\n")
+    return 127
+  return proc.returncode
+
+
 def run(verb_args: Sequence[str], *, verbose: bool = False) -> int:
   """Dispatch ``mnem <verb-args>`` through the translation table."""
   resolved = lookup(verb_args)
@@ -86,6 +101,13 @@ def run(verb_args: Sequence[str], *, verbose: bool = False) -> int:
 
   mapping, rewritten = resolved
   argv = [mapping.binary, *rewritten]
+
+  if mapping.interactive:
+    # No --json injection, no stdio capture. CONVENTIONS.md: interactive
+    # commands reject --json; injecting it here would force the
+    # underlying tool to exit 1 every time.
+    return _run_interactive(argv)
+
   if "--json" not in argv:
     argv.append("--json")
 
