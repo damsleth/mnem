@@ -4,22 +4,83 @@ Subcommands:
 - hello   - one-screen elevator pitch
 - version - mnem version + observed component versions
 - doctor  - aggregate health check across the suite
+- init    - first-run wizard (interactive; rejects --json)
 - query   - passthrough to `yaams query` (with --tier aliasing)
 - ingest  - passthrough to `yaams ingest`
-- promote, ledger, mail, calendar, auth: Phase 3b
+- promote - passthrough to `yaams promote <sub>`
+- ledger  - passthrough to `ledger <sub>`
+- auth    - passthrough to `owa-piggy <sub>`
+- mail    - passthrough to `owa-mail`
+- calendar - passthrough to `owa-cal`
+- graph   - passthrough to `owa-graph`
+- people  - passthrough to `owa-people`
+- schedule - passthrough to `owa-sched`
+- drive   - passthrough to `owa-drive`
 
 Top-level flags: --version (Click default), --doctor, --json,
 --verbose. The doctor flag is wired so `mnem --doctor` works for
 parity with other binaries in the suite.
+
+First-run hint middleware: subcommands that depend on the yaams DB
+(query, ingest, promote review) exit 4 with a clean
+``Run: mnem init`` pointer when the user has no mnem config yet.
 """
 
 from __future__ import annotations
 
+import os
 import sys
+from pathlib import Path
 
 import click
 
 from mnem import __version__
+
+
+# --- First-run hint helpers -------------------------------------------------
+
+def _yaams_config_path() -> Path:
+  xdg = os.environ.get("XDG_CONFIG_HOME")
+  base = Path(xdg) if xdg else Path.home() / ".config"
+  return base / "mnem" / "yaams" / "config.yaml"
+
+
+_VERBS_NEEDING_CONFIG = {
+  ("query",),
+  ("ingest",),
+  ("promote", "review"),
+  ("promote", "generate"),
+}
+
+
+def _explicit_config_in_args(args: tuple[str, ...]) -> bool:
+  """True iff the user passed --config / --config=... themselves."""
+  return any(
+    a == "--config" or a.startswith("--config=") for a in args
+  )
+
+
+def _ensure_config(verb_args: tuple[str, ...]) -> int | None:
+  """Return None if it's OK to proceed; an exit code if mnem should
+  bail with a first-run hint."""
+  if not verb_args:
+    return None
+  for prefix in _VERBS_NEEDING_CONFIG:
+    if tuple(verb_args[: len(prefix)]) == prefix:
+      break
+  else:
+    return None
+  if _explicit_config_in_args(verb_args):
+    return None
+  cfg = _yaams_config_path()
+  if cfg.is_file():
+    return None
+  click.echo(
+    f"x mnem: no mnem config at {cfg}.\n"
+    f"    Fix:  mnem init",
+    err=True,
+  )
+  return 4  # EXIT_NOT_FOUND per CONVENTIONS.md
 
 
 @click.group(
@@ -84,26 +145,60 @@ def doctor_cmd(ctx: click.Context, as_json: bool) -> None:
   ctx.exit(run(as_json or ctx.obj.get("json", False)))
 
 
-@cli.command(
-  "query",
-  context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
+@cli.command("init")
+@click.option(
+  "--json",
+  "as_json",
+  is_flag=True,
+  default=False,
+  help="(rejected) init is interactive; use `mnem doctor --json` instead.",
 )
-@click.argument("args", nargs=-1, type=click.UNPROCESSED)
+@click.option(
+  "--force",
+  is_flag=True,
+  default=False,
+  help="Overwrite an existing yaams config without prompting.",
+)
 @click.pass_context
-def query_cmd(ctx: click.Context, args: tuple[str, ...]) -> None:
-  from mnem.commands.passthrough import run
-  ctx.exit(run(["query", *args], verbose=ctx.obj.get("verbose", False)))
+def init_cmd(ctx: click.Context, as_json: bool, force: bool) -> None:
+  from mnem.commands.init import run
+  ctx.exit(run(as_json or ctx.obj.get("json", False), force=force))
 
 
-@cli.command(
-  "ingest",
-  context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
-)
-@click.argument("args", nargs=-1, type=click.UNPROCESSED)
-@click.pass_context
-def ingest_cmd(ctx: click.Context, args: tuple[str, ...]) -> None:
-  from mnem.commands.passthrough import run
-  ctx.exit(run(["ingest", *args], verbose=ctx.obj.get("verbose", False)))
+def _make_passthrough(name: str, head: tuple[str, ...]):
+  """Generate a Click subcommand that forwards to the passthrough
+  module after the first-run hint check."""
+
+  @cli.command(
+    name,
+    context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
+  )
+  @click.argument("args", nargs=-1, type=click.UNPROCESSED)
+  @click.pass_context
+  def _cmd(ctx: click.Context, args: tuple[str, ...]) -> None:
+    full = (*head, *args)
+    hint = _ensure_config(full)
+    if hint is not None:
+      ctx.exit(hint)
+    from mnem.commands.passthrough import run
+    ctx.exit(run(list(full), verbose=ctx.obj.get("verbose", False)))
+
+  _cmd.__doc__ = f"Run `mnem {name}` against the suite."
+  return _cmd
+
+
+# Translation-table-driven Click commands.
+query_cmd = _make_passthrough("query", ("query",))
+ingest_cmd = _make_passthrough("ingest", ("ingest",))
+promote_cmd = _make_passthrough("promote", ("promote",))
+ledger_cmd = _make_passthrough("ledger", ("ledger",))
+auth_cmd = _make_passthrough("auth", ("auth",))
+mail_cmd = _make_passthrough("mail", ("mail",))
+calendar_cmd = _make_passthrough("calendar", ("calendar",))
+graph_cmd = _make_passthrough("graph", ("graph",))
+people_cmd = _make_passthrough("people", ("people",))
+schedule_cmd = _make_passthrough("schedule", ("schedule",))
+drive_cmd = _make_passthrough("drive", ("drive",))
 
 
 def main() -> int:

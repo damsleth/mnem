@@ -15,11 +15,12 @@ from mnem import __version__
 from mnem.router import verbs
 
 
-# Static verbs that ship in 3a beyond the translation table.
+# Static verbs that live in mnem itself (not the translation table).
 _BUILTIN_VERBS = [
   ("hello", "mnem", "Show this elevator pitch"),
   ("version", "mnem", "Show mnem version and observed component versions"),
   ("doctor", "mnem", "Run health checks across the whole suite"),
+  ("init", "mnem", "First-run wizard: detect sources and write config"),
 ]
 
 
