@@ -42,11 +42,15 @@ def _passthrough(extra: Sequence[str] = ()) -> Callable[[Sequence[str]], list[st
 
 
 def _query_rewrite(args: Sequence[str]) -> list[str]:
-  """`mnem query` is `yaams query` with --tier ledger -> --source ledger.
+  """`mnem query` is a thin passthrough to `yaams query`.
 
-  yaams already accepts both, but the alias is documented here so the
-  translation table is the single source of truth for what mnem
-  rewrites.
+  Earlier drafts of CONVENTIONS.md described mnem rewriting
+  `--tier ledger` into `--source ledger` here. That rewrite became
+  unnecessary in Phase 2b when yaams gained native `--tier
+  raw|ledger|both` support (the alias rewrite happens inside yaams
+  now). Per the router rule "argument mapping allowed, business
+  logic forbidden", anything yaams handles natively stays as a
+  passthrough.
   """
   return ["query", *list(args)]
 

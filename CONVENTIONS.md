@@ -324,9 +324,17 @@ watermarks, and adapter code do not change. The CLI surface accepts
 - `yaams ingest --source ledger` works and dispatches the
   `tier2_ledger` adapter.
 - `yaams query --source ledger` filters by `tier2_ledger`.
+- `yaams query --tier raw|ledger|both` is a friendlier alternative
+  to `--source ledger` (added in Phase 2b); yaams owns the alias
+  rewrite internally.
 - `config.yaml` accepts an `ingest.ledger:` block as an alias for
   `ingest.tier2_ledger:`; both keys resolve to the same adapter.
-- `mnem query --tier=ledger` maps to `yaams query --source ledger`.
+- `mnem query --tier=ledger` is a **passthrough** to `yaams query
+  --tier=ledger`. (Earlier drafts had mnem rewrite `--tier ledger`
+  into `--source ledger`; that rewrite became unnecessary in Phase
+  2b when yaams gained native `--tier` support. The router stays as
+  a thin argv passthrough per the "argument mapping, no business
+  logic" rule.)
 
 No data migration. No watermark migration. CLI aliasing only. Anyone
 reading the SQLite directly sees the unchanged source id.
