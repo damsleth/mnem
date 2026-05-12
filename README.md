@@ -38,7 +38,16 @@ a single user-facing surface.
 brew install damsleth/tap/mnem
 ```
 
-That pulls the whole suite via formula dependencies. Then:
+The Homebrew formula pulls the whole suite via dependencies. On
+PyPI the package is `mnem-suite` (both `mnem` and `mnem-cli` were
+already taken on PyPI by unrelated projects); the installed binary
+is still `mnem`:
+
+```bash
+pipx install mnem-suite
+```
+
+Then:
 
 ```bash
 mnem init           # detect sources, write config, run a dry-run

@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mnem"
+name = "mnem-suite"
 version = "0.1.0"
 description = "Meta-CLI and suite hub for the mnem memory suite (yaams, cognitive-ledger, owa-piggy, owa-tools)"
 readme = "README.md"
