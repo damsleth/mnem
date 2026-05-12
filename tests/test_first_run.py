@@ -52,6 +52,33 @@ def test_ensure_config_bypasses_when_user_passes_explicit_config(monkeypatch, tm
   assert _ensure_config(("query", "--config=/elsewhere.yaml")) is None
 
 
+def test_ensure_config_bypasses_when_yaams_config_env_set(monkeypatch, tmp_path: Path):
+  """Parity invariant from CONVENTIONS.md: setting YAAMS_CONFIG must
+  make `yaams query` and `mnem query` resolve to the same config.
+  mnem's first-run guard must defer to the env var the same way
+  yaams does."""
+  monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+  monkeypatch.setenv("YAAMS_CONFIG", "/elsewhere/cfg.yaml")
+  assert _ensure_config(("query", "anything")) is None
+  assert _ensure_config(("ingest",)) is None
+
+
+def test_ensure_config_bypasses_when_ledger_config_env_set(monkeypatch, tmp_path: Path):
+  monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+  monkeypatch.setenv("LEDGER_CONFIG", "/elsewhere/cfg.yaml")
+  assert _ensure_config(("query",)) is None
+
+
+def test_ensure_config_still_fires_when_no_env_var_and_no_explicit_config(monkeypatch, tmp_path: Path):
+  monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+  monkeypatch.delenv("YAAMS_CONFIG", raising=False)
+  monkeypatch.delenv("LEDGER_CONFIG", raising=False)
+  monkeypatch.delenv("OWA_CONFIG", raising=False)
+  monkeypatch.delenv("OWA_PIGGY_CONFIG", raising=False)
+  monkeypatch.delenv("MNEM_CONFIG", raising=False)
+  assert _ensure_config(("query",)) == 4
+
+
 def test_ensure_config_fires_on_promote_review(monkeypatch, tmp_path: Path):
   monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
   assert _ensure_config(("promote", "review")) == 4

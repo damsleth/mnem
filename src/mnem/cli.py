@@ -60,6 +60,13 @@ def _explicit_config_in_args(args: tuple[str, ...]) -> bool:
   )
 
 
+# Env vars that bypass the first-run guard. Per CONVENTIONS.md the
+# direct-CLI / mnem parity invariant requires `YAAMS_CONFIG` (and
+# friends) to resolve the same config in both invocation paths; mnem
+# must defer to them when set even if its own config doesn't exist.
+_CONFIG_ENV_VARS = ("YAAMS_CONFIG", "LEDGER_CONFIG", "OWA_CONFIG", "OWA_PIGGY_CONFIG", "MNEM_CONFIG")
+
+
 def _ensure_config(verb_args: tuple[str, ...]) -> int | None:
   """Return None if it's OK to proceed; an exit code if mnem should
   bail with a first-run hint."""
@@ -71,6 +78,8 @@ def _ensure_config(verb_args: tuple[str, ...]) -> int | None:
   else:
     return None
   if _explicit_config_in_args(verb_args):
+    return None
+  if any(os.environ.get(name) for name in _CONFIG_ENV_VARS):
     return None
   cfg = _yaams_config_path()
   if cfg.is_file():
@@ -202,7 +211,27 @@ drive_cmd = _make_passthrough("drive", ("drive",))
 
 
 def main() -> int:
-  return cli(standalone_mode=False) or 0
+  """Top-level entry. Catches Click usage errors so users get a clean
+  one-line message instead of a Python traceback.
+
+  Free-text diagnostics (per CONVENTIONS.md stream routing) go to
+  stderr. Exit codes follow Click's defaults: 2 for usage errors, 1
+  for everything else.
+  """
+  try:
+    return cli(standalone_mode=False) or 0
+  except click.exceptions.UsageError as exc:
+    # `mnem --bad-flag`, `mnem hello --does-not-exist`, etc.
+    # Click already builds a helpful message; just route it cleanly.
+    exc.show(file=sys.stderr)
+    return exc.exit_code
+  except click.exceptions.Abort:
+    # User hit Ctrl-C in an interactive prompt.
+    sys.stderr.write("\nAborted.\n")
+    return 1
+  except click.exceptions.ClickException as exc:
+    exc.show(file=sys.stderr)
+    return exc.exit_code
 
 
 if __name__ == "__main__":
