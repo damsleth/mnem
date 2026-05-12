@@ -124,10 +124,22 @@ def probe_github() -> ProbeResult:
       reason="gh installed but no auth token",
       hint="gh auth login",
     )
+  # Best-effort username lookup so the generated config doesn't ship with
+  # an empty `username:` (which causes ingest to 404 against /users//events).
+  username = ""
+  who = subprocess.run(
+    ["gh", "api", "user", "--jq", ".login"],
+    capture_output=True, text=True, timeout=5,
+  )
+  if who.returncode == 0:
+    username = who.stdout.strip()
+  extras = {"username": username} if username else {}
+  reason = f"gh authenticated as {username}" if username else "gh authenticated; token reachable"
   return ProbeResult(
     "github",
     enabled=True,
-    reason="gh authenticated; token reachable",
+    reason=reason,
+    extras=extras,
   )
 
 
@@ -203,6 +215,46 @@ def probe_obsidian() -> ProbeResult:
   )
 
 
+def probe_existing_yaams_config() -> ProbeResult:
+  """Detect a pre-existing standalone yaams config the user already curates.
+
+  Looks at the canonical yaams location (`$XDG_CONFIG_HOME/yaams/config.yaml`).
+  If found, the wizard will offer to reuse it in place rather than overwrite
+  it with mnem's freshly-generated stub. Parsing is best-effort and never
+  fatal: if PyYAML isn't importable we still report the path so the wizard
+  can offer the reuse-in-place path.
+  """
+  xdg = os.environ.get("XDG_CONFIG_HOME")
+  base = Path(xdg) if xdg else Path.home() / ".config"
+  cfg = base / "yaams" / "config.yaml"
+  if not cfg.is_file():
+    return ProbeResult(
+      "existing_yaams_config",
+      enabled=False,
+      reason="no standalone yaams config at ~/.config/yaams/config.yaml",
+    )
+  parsed: dict[str, Any] = {}
+  parse_note: str | None = None
+  try:
+    import yaml  # type: ignore
+    parsed = yaml.safe_load(cfg.read_text(encoding="utf-8")) or {}
+  except ModuleNotFoundError:
+    parse_note = "PyYAML not importable; reuse-in-place still works"
+  except Exception as exc:  # noqa: BLE001
+    parse_note = f"yaml parse failed: {exc}"
+  extras: dict[str, Any] = {"path": str(cfg)}
+  if parsed:
+    extras["parsed"] = parsed
+  if parse_note:
+    extras["parse_note"] = parse_note
+  return ProbeResult(
+    "existing_yaams_config",
+    enabled=True,
+    reason=f"existing yaams config at {cfg}",
+    extras=extras,
+  )
+
+
 def probe_cognitive_ledger() -> ProbeResult:
   if shutil.which("ledger") is None:
     return ProbeResult(
@@ -256,6 +308,7 @@ _ALL_PROBES = [
   probe_owa_piggy,
   probe_obsidian,
   probe_cognitive_ledger,
+  probe_existing_yaams_config,
 ]
 
 

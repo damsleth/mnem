@@ -46,6 +46,20 @@ def _data_dir() -> Path:
   return Path(mnem_home) if mnem_home else Path.home() / ".local" / "share" / "mnem"
 
 
+def _existing_yaams_values(probes: list[ProbeResult]) -> dict:
+  """Pull through values from a pre-existing standalone yaams config.
+
+  Returned dict mirrors the keys we hand to `_build_yaams_config` for
+  seeding: github username, notes vault_path, mail user_addresses, calendar
+  profiles, signal flags, ledger paths. Empty dict if no parseable existing
+  config (the caller then falls back to probe defaults).
+  """
+  for p in probes:
+    if p.name == "existing_yaams_config" and p.enabled:
+      return p.extras.get("parsed") or {}
+  return {}
+
+
 def _build_yaams_config(probes: list[ProbeResult]) -> str:
   """Hand-roll YAML so we don't add a PyYAML dependency to mnem.
 
@@ -53,6 +67,11 @@ def _build_yaams_config(probes: list[ProbeResult]) -> str:
   source under `ingest.<name>` carries an explicit `enabled` flag
   plus tool-specific keys. A leading comment block explains the
   shape and where to edit if probe detection got it wrong.
+
+  When a pre-existing standalone yaams config is detected and parseable, we
+  seed values from it (github username, mail user_addresses, notes vault_path,
+  calendar/teams profiles) so the user doesn't lose curated state by going
+  through `mnem init`.
   """
   data = _data_dir()
   db_path = data / "yaams" / "data.db"
@@ -70,6 +89,24 @@ def _build_yaams_config(probes: list[ProbeResult]) -> str:
   owa = _probe("owa_piggy")
 
   owa_profiles = owa.extras.get("profiles", []) if owa.enabled else []
+
+  existing = _existing_yaams_values(probes)
+  ex_ingest = (existing.get("ingest") or {}) if isinstance(existing, dict) else {}
+  ex_email = ex_ingest.get("email") or {}
+  ex_github = ex_ingest.get("github") or {}
+  ex_notes = ex_ingest.get("notes") or {}
+  ex_tier2 = ex_ingest.get("tier2_ledger") or {}
+  ex_calendar = ex_ingest.get("calendar") or {}
+  ex_teams = ex_ingest.get("teams") or {}
+
+  github_username = ex_github.get("username") or github.extras.get("username") or ""
+  user_addresses = ex_email.get("user_addresses") or []
+  notes_vault = ex_notes.get("vault_path") or notes.extras.get("vault_path", "~/Documents/Obsidian")
+  tier2_notes = ex_tier2.get("notes_path") or tier2.extras.get("notes_path", "~/.config/cognitive-ledger/notes")
+  calendar_profiles = ex_calendar.get("profiles") or owa_profiles
+  teams_profiles = ex_teams.get("profiles") or owa_profiles
+  calendar_enabled = bool(ex_calendar.get("enabled")) if ex_calendar else False
+  teams_enabled = bool(ex_teams.get("enabled")) if ex_teams else False
 
   def _bool(b: bool) -> str:
     return "true" if b else "false"
@@ -101,8 +138,8 @@ ingest:
   email:
     {_hint_line(email)}
     enabled: {_bool(email.enabled)}
-    sources: []   # add Apple Mail directories or .mbox files manually
-    user_addresses: []
+    sources: {ex_email.get('sources') or []}   # add Apple Mail directories or .mbox files manually
+    user_addresses: {user_addresses}
 
   signal:
     {_hint_line(signal)}
@@ -112,28 +149,28 @@ ingest:
 
   notes:
     {_hint_line(notes)}
-    enabled: {_bool(notes.enabled)}
-    vault_path: {notes.extras.get("vault_path", "~/Documents/Obsidian")}
+    enabled: {_bool(notes.enabled or bool(ex_notes.get('enabled')))}
+    vault_path: {notes_vault}
 
   tier2_ledger:
     {_hint_line(tier2)}
-    enabled: {_bool(tier2.enabled)}
-    notes_path: {tier2.extras.get("notes_path", "~/.config/cognitive-ledger/notes")}
+    enabled: {_bool(tier2.enabled or bool(ex_tier2.get('enabled')))}
+    notes_path: {tier2_notes}
 
   github:
     {_hint_line(github)}
     enabled: {_bool(github.enabled)}
-    username: ''   # set your GitHub username here
+    username: '{github_username}'   # set your GitHub username here
 
   # Teams + calendar consume owa-piggy profiles. Add per-profile
   # blocks if you ingest Teams or calendar data.
   teams:
-    enabled: false
-    profiles: {owa_profiles}
+    enabled: {_bool(teams_enabled)}
+    profiles: {teams_profiles}
 
   calendar:
-    enabled: false
-    profiles: {owa_profiles}
+    enabled: {_bool(calendar_enabled)}
+    profiles: {calendar_profiles}
 
 embed:
   model: BAAI/bge-m3
@@ -162,6 +199,8 @@ def _yes(prompt: str, default: bool = True) -> bool:
 def _print_probe_summary(probes: list[ProbeResult]) -> None:
   click.echo("\nSources detected:")
   for p in probes:
+    if p.name == "existing_yaams_config":
+      continue  # reported separately as a config-reuse prompt
     marker = "+" if p.enabled else "."
     click.echo(f"  {marker} {p.name:<16} {p.reason}")
     if not p.enabled and p.hint:
@@ -205,13 +244,41 @@ def run(as_json: bool, *, force: bool = False) -> int:
   probes = run_all()
   _print_probe_summary(probes)
 
-  # --- Write config ---------------------------------------------------
+  # --- Pick the config we will hand to yaams --------------------------
+  # Three cases:
+  #   1. A standalone yaams config already exists at ~/.config/yaams/config.yaml.
+  #      Default is to reuse it in place. Mnem won't touch it.
+  #   2. No standalone config, but mnem has written one before. Keep unless
+  #      the user opts in to overwrite (or --force was passed).
+  #   3. Greenfield. Write a fresh config seeded from probes.
   cfg_path = _yaams_config_path()
   cfg_path.parent.mkdir(parents=True, exist_ok=True)
   data = _data_dir()
   data.mkdir(parents=True, exist_ok=True)
 
-  if cfg_path.is_file() and not force:
+  existing_probe = next((p for p in probes if p.name == "existing_yaams_config" and p.enabled), None)
+  existing_cfg_path = Path(existing_probe.extras["path"]) if existing_probe else None
+
+  if existing_cfg_path and existing_cfg_path != cfg_path:
+    click.echo(f"\nDetected existing yaams config at {existing_cfg_path}")
+    if existing_probe and "parse_note" in existing_probe.extras:
+      click.echo(f"  note: {existing_probe.extras['parse_note']}")
+    if _yes("Reuse this config in place (recommended)?", default=True):
+      cfg_path = existing_cfg_path
+      click.echo(f"Using {cfg_path}")
+    else:
+      click.echo("Generating a separate mnem-managed config.")
+      if cfg_path.is_file() and not force:
+        click.echo(f"Config already exists at {cfg_path}")
+        if not _yes("Overwrite?", default=False):
+          click.echo("Keeping existing mnem-managed config.")
+        else:
+          cfg_path.write_text(_build_yaams_config(probes), encoding="utf-8")
+          click.echo(f"  wrote {cfg_path} (seeded from {existing_cfg_path})")
+      else:
+        cfg_path.write_text(_build_yaams_config(probes), encoding="utf-8")
+        click.echo(f"Wrote {cfg_path} (seeded from {existing_cfg_path})")
+  elif cfg_path.is_file() and not force:
     click.echo(f"\nConfig already exists at {cfg_path}")
     if not _yes("Overwrite?", default=False):
       click.echo("Keeping existing config.")
