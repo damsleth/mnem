@@ -37,6 +37,53 @@ def test_parse_stdout_handles_data_doc():
   assert payload["query"] == "x"
 
 
+def test_parse_stdout_handles_pretty_printed_multiline_json():
+  """yaams query --json indents with 2 spaces by default, so the
+  result is a multi-line JSON document. parse_stdout must accept
+  that, not just NDJSON streams."""
+  pretty = (
+    '{\n'
+    '  "tool": "yaams",\n'
+    '  "query_id": "abc",\n'
+    '  "results": []\n'
+    '}\n'
+  )
+  payload = parse_stdout(pretty)
+  assert payload is not None
+  assert payload["tool"] == "yaams"
+  assert payload["query_id"] == "abc"
+
+
+def test_parse_stdout_handles_pretty_error_envelope():
+  """Pretty-printed failure envelope from a data command."""
+  pretty = (
+    '{\n'
+    '  "tool": "owa-cal",\n'
+    '  "ok": false,\n'
+    '  "error": {\n'
+    '    "code": "auth_expired",\n'
+    '    "message": "M365 token expired"\n'
+    '  }\n'
+    '}\n'
+  )
+  payload = parse_stdout(pretty)
+  assert payload is not None
+  assert payload["ok"] is False
+  assert payload["error"]["code"] == "auth_expired"
+
+
+def test_parse_stdout_prefers_ndjson_result_over_whole_text_parse():
+  """NDJSON streams have multiple top-level objects; whole-text
+  parse fails, so the fallback per-line walk picks the last one."""
+  ndjson = (
+    '{"type":"progress","done":1}\n'
+    '{"type":"warning","message":"oops"}\n'
+    '{"type":"result","ok":true,"command":"ingest"}\n'
+  )
+  payload = parse_stdout(ndjson)
+  assert payload["type"] == "result"
+
+
 def test_parse_stdout_returns_none_on_empty():
   assert parse_stdout("") is None
   assert parse_stdout("   ") is None

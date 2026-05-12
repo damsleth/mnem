@@ -131,25 +131,35 @@ def cli(ctx: click.Context, doctor: bool, as_json_top: bool, verbose: bool) -> N
 
 
 @cli.command("hello")
-@click.option("--json", "as_json", is_flag=True, default=False)
+@click.option("--json", "as_json", is_flag=True, default=False, help="Machine mode (JSON document on stdout).")
+@click.option("--pretty", is_flag=True, default=False, help="Human rendering (default).")
 @click.pass_context
-def hello_cmd(ctx: click.Context, as_json: bool) -> None:
+def hello_cmd(ctx: click.Context, as_json: bool, pretty: bool) -> None:
+  # --pretty is accepted per the CONVENTIONS per-command table for
+  # data-class commands. The default already is human-pretty, so the
+  # flag is effectively a confirmation rather than a mode flip - but
+  # --json wins if both are passed.
+  del pretty  # noqa: F841 - acknowledged for contract conformance
   from mnem.commands.hello import run
   ctx.exit(run(as_json or ctx.obj.get("json", False)))
 
 
 @cli.command("version")
-@click.option("--json", "as_json", is_flag=True, default=False)
+@click.option("--json", "as_json", is_flag=True, default=False, help="Machine mode (JSON document on stdout).")
+@click.option("--pretty", is_flag=True, default=False, help="Human rendering (default).")
 @click.pass_context
-def version_cmd(ctx: click.Context, as_json: bool) -> None:
+def version_cmd(ctx: click.Context, as_json: bool, pretty: bool) -> None:
+  del pretty
   from mnem.commands.version import run
   ctx.exit(run(as_json or ctx.obj.get("json", False)))
 
 
 @cli.command("doctor")
-@click.option("--json", "as_json", is_flag=True, default=False)
+@click.option("--json", "as_json", is_flag=True, default=False, help="Machine mode (JSON document on stdout).")
+@click.option("--pretty", is_flag=True, default=False, help="Human rendering (default).")
 @click.pass_context
-def doctor_cmd(ctx: click.Context, as_json: bool) -> None:
+def doctor_cmd(ctx: click.Context, as_json: bool, pretty: bool) -> None:
+  del pretty
   from mnem.commands.doctor import run
   ctx.exit(run(as_json or ctx.obj.get("json", False)))
 

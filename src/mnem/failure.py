@@ -87,22 +87,44 @@ class SubprocessResult:
 
 
 def parse_stdout(stdout: str) -> dict | None:
-  """Parse the last JSON line on stdout.
+  """Parse the final JSON value on stdout.
 
-  Underlying tools may emit NDJSON streams (action commands with
-  --json) or a single JSON document (data commands). Both end in
-  one parseable JSON line - the streaming spec's ``{type:"result"}``
-  for actions, or the document itself for data.
+  Underlying tools emit one of two shapes:
+
+  1. Action commands with --json: NDJSON stream (progress / warning
+     / result lines), terminated by a single ``{type:"result", ...}``
+     line. The result line is the value we want.
+  2. Data commands with --json: a single JSON document, possibly
+     pretty-printed across multiple lines.
+
+  Try (1) first by attempting whole-text parse (works for compact
+  single-line JSON, common in success/failure envelopes). Fall back
+  to last-line parse for NDJSON streams.
+
+  Returns the parsed dict, or None if no JSON could be recovered
+  (the failure-handling layer treats that as "tool crashed").
   """
   text = (stdout or "").strip()
   if not text:
     return None
+  # Whole-text first: handles pretty-printed multi-line data docs
+  # (yaams query --json indents with 2 spaces by default, ledger
+  # paths does the same).
+  try:
+    parsed = json.loads(text)
+    if isinstance(parsed, dict):
+      return parsed
+  except json.JSONDecodeError:
+    pass
+  # NDJSON streaming: walk back to the last parseable line.
   for line in reversed(text.splitlines()):
     line = line.strip()
     if not line:
       continue
     try:
-      return json.loads(line)
+      parsed = json.loads(line)
+      if isinstance(parsed, dict):
+        return parsed
     except json.JSONDecodeError:
       continue
   return None

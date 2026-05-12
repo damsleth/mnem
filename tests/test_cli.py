@@ -44,6 +44,39 @@ def test_bare_mnem_falls_back_to_hello():
   assert result.exit_code in (0, 2)
 
 
+# --- --pretty acceptance on data-class builtins ---------------------------
+# CONVENTIONS.md per-command table requires --pretty on hello / version /
+# doctor. Default is already human-pretty so --pretty is effectively a
+# confirmation; what we pin is that the flag is accepted (no UsageError).
+
+def test_hello_accepts_pretty_flag():
+  result = CliRunner().invoke(cli, ["hello", "--pretty"])
+  assert result.exit_code == 0, result.output
+  assert "mnem" in result.output
+
+
+def test_version_accepts_pretty_flag():
+  result = CliRunner().invoke(cli, ["version", "--pretty"])
+  assert result.exit_code == 0, result.output
+  assert "mnem" in result.output
+
+
+def test_doctor_accepts_pretty_flag():
+  result = CliRunner().invoke(cli, ["doctor", "--pretty"])
+  # doctor exit can be 0 or 1 depending on whether components are on PATH.
+  assert result.exit_code in (0, 1)
+  assert "mnem doctor" in result.output
+
+
+def test_hello_json_wins_over_pretty_when_both_passed():
+  """If a caller passes both, --json takes precedence (machine
+  mode is the safer default under ambiguity, matching CONVENTIONS
+  wording on the --json flag)."""
+  result = CliRunner().invoke(cli, ["hello", "--json", "--pretty"])
+  assert result.exit_code == 0
+  json.loads(result.output.strip())  # must parse
+
+
 # --- mnem --version --------------------------------------------------------
 
 def test_version_flag_works():
