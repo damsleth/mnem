@@ -35,14 +35,21 @@ from pathlib import Path
 import click
 
 from mnem import __version__
+from mnem.config import master_config_path, resolved_yaams_config
 
 
 # --- First-run hint helpers -------------------------------------------------
 
 def _yaams_config_path() -> Path:
-  xdg = os.environ.get("XDG_CONFIG_HOME")
-  base = Path(xdg) if xdg else Path.home() / ".config"
-  return base / "mnem" / "yaams" / "config.yaml"
+  """Path to the master mnem config (the gate for the first-run guard).
+
+  Named ``_yaams_config_path`` for historical continuity; the file it
+  points at is now ``$XDG_CONFIG_HOME/mnem/config.yaml``, the suite
+  master config. The actual yaams config it references lives wherever
+  ``yaams_config:`` inside the master points - see
+  ``mnem.config.resolved_yaams_config``.
+  """
+  return master_config_path()
 
 
 _VERBS_NEEDING_CONFIG = {
@@ -198,19 +205,23 @@ def init_cmd(ctx: click.Context, as_json: bool, force: bool) -> None:
 
 
 def _yaams_config_env(full: tuple[str, ...]) -> dict[str, str]:
-  """Return ``{"YAAMS_CONFIG": <mnem yaams config path>}`` when mnem
-  should hand its yaams config to the child via env, else ``{}``.
+  """Return ``{"YAAMS_CONFIG": <yaams config path>}`` when mnem
+  should hand a yaams config to the child via env, else ``{}``.
 
-  Plan 05 Part B / review F2: ``mnem init`` writes
-  ``$XDG_CONFIG_HOME/mnem/yaams/config.yaml`` but YAAMS resolution may
-  not yet include that path on older yaams builds. To keep first-day
-  flow working regardless, mnem injects ``YAAMS_CONFIG`` for
-  yaams-backed routes when:
+  The path is resolved from the master mnem config
+  (``$XDG_CONFIG_HOME/mnem/config.yaml``), falling back to the
+  canonical ``$XDG_CONFIG_HOME/yaams/config.yaml``. yaams honors
+  ``YAAMS_CONFIG`` natively, so forwarding the path through env keeps
+  ``yaams <verb>`` and ``mnem <verb>`` resolving to the same config
+  even on older yaams builds whose search path doesn't include
+  ours.
+
+  Conditions for injection (all must hold):
 
   - the head verb routes to yaams, AND
   - the user did not set ``YAAMS_CONFIG`` themselves, AND
   - the user did not pass ``--config`` explicitly, AND
-  - mnem's yaams config file exists on disk.
+  - a yaams config is resolvable on disk.
 
   Never overrides a user-set ``YAAMS_CONFIG``.
   """
@@ -225,8 +236,8 @@ def _yaams_config_env(full: tuple[str, ...]) -> dict[str, str]:
     return {}
   if _explicit_config_in_args(full):
     return {}
-  cfg = _yaams_config_path()
-  if not cfg.is_file():
+  cfg = resolved_yaams_config()
+  if cfg is None:
     return {}
   return {"YAAMS_CONFIG": str(cfg)}
 

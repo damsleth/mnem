@@ -4,56 +4,52 @@ Output class: interactive (rejects --json with a pointer to a
 machine-readable alternative; the wizard never makes sense in a
 machine context because it prompts and writes files).
 
-Flow per the three-pillar spec in mnem_plan.md:
+Behavior (rewritten 2026-05-13):
 
 1. Confirm intent. Show what will be created and where.
 2. Detect sources via mnem.sources.run_all().
-3. Generate $XDG_CONFIG_HOME/mnem/yaams/config.yaml with explicit
-   enabled: true/false per source.
-4. Run `yaams setup` (no-op if models already installed).
-5. Run `yaams init-db`.
-6. Run `yaams ingest --dry-run` and show the count summary.
-7. Print three suggested next commands.
+3. Resolve each tool's config:
+   - ``yaams``: if ``~/.config/yaams/config.yaml`` exists, reuse in
+     place. Else (greenfield) generate one from probe results and
+     write it to the canonical location (not a private mnem copy).
+   - ``cognitive-ledger``: if ``~/.config/cognitive-ledger/config.yaml``
+     exists, record the path. Else print a hint to run ``ledger init``
+     and leave the pointer empty.
+   - ``owa-piggy``: if ``~/.config/owa-piggy/profiles.conf`` exists,
+     record the path. Else print a hint to run ``owa-piggy setup``
+     and leave the pointer empty.
+4. Write the master ``$XDG_CONFIG_HOME/mnem/config.yaml`` with the
+   resolved tool paths and mnem-specific settings.
+5. Run ``yaams setup``, ``yaams init-db``, ``yaams ingest --dry-run``
+   if yaams is on PATH.
+6. Print three suggested next commands.
 
-Idempotent: re-running probes again, leaves existing config
-untouched unless the user opts in.
+Idempotent: re-running probes again. The master config is overwritten
+unless ``--force`` is omitted *and* the existing content is
+unchanged; the user is prompted on conflict.
 """
 
 from __future__ import annotations
 
-import os
 import subprocess
-import sys
 from pathlib import Path
 
 import click
 
+from mnem.config import (
+  canonical_ledger_config,
+  canonical_owa_piggy_config,
+  canonical_yaams_config,
+  config_dir,
+  data_root_default,
+  master_config_path,
+  render_master,
+)
 from mnem.sources import ProbeResult, run_all
 
 
-def _config_dir() -> Path:
-  xdg = os.environ.get("XDG_CONFIG_HOME")
-  base = Path(xdg) if xdg else Path.home() / ".config"
-  return base / "mnem"
-
-
-def _yaams_config_path() -> Path:
-  return _config_dir() / "yaams" / "config.yaml"
-
-
-def _data_dir() -> Path:
-  mnem_home = os.environ.get("MNEM_HOME")
-  return Path(mnem_home) if mnem_home else Path.home() / ".local" / "share" / "mnem"
-
-
 def _existing_yaams_values(probes: list[ProbeResult]) -> dict:
-  """Pull through values from a pre-existing standalone yaams config.
-
-  Returned dict mirrors the keys we hand to `_build_yaams_config` for
-  seeding: github username, notes vault_path, mail user_addresses, calendar
-  profiles, signal flags, ledger paths. Empty dict if no parseable existing
-  config (the caller then falls back to probe defaults).
-  """
+  """Pull through values from a pre-existing standalone yaams config."""
   for p in probes:
     if p.name == "existing_yaams_config" and p.enabled:
       return p.extras.get("parsed") or {}
@@ -61,19 +57,12 @@ def _existing_yaams_values(probes: list[ProbeResult]) -> dict:
 
 
 def _build_yaams_config(probes: list[ProbeResult]) -> str:
-  """Hand-roll YAML so we don't add a PyYAML dependency to mnem.
+  """Generate a yaams config seeded from probe results.
 
-  The schema follows YAAMS' existing config.yaml.example: every
-  source under `ingest.<name>` carries an explicit `enabled` flag
-  plus tool-specific keys. A leading comment block explains the
-  shape and where to edit if probe detection got it wrong.
-
-  When a pre-existing standalone yaams config is detected and parseable, we
-  seed values from it (github username, mail user_addresses, notes vault_path,
-  calendar/teams profiles) so the user doesn't lose curated state by going
-  through `mnem init`.
+  Used only in the greenfield case (no ``~/.config/yaams/config.yaml``
+  on disk). Schema mirrors yaams' own ``config.yaml.example``.
   """
-  data = _data_dir()
+  data = data_root_default()
   db_path = data / "yaams" / "data.db"
   by_name = {p.name: p for p in probes}
 
@@ -221,6 +210,52 @@ def _run_step(label: str, argv: list[str]) -> int:
   return result.returncode
 
 
+def _resolve_yaams_config(probes: list[ProbeResult], *, force: bool) -> Path | None:
+  """Decide which yaams config path to record in the master config.
+
+  Returns the resolved path, or None if the user declined to set one.
+  Side effects: may write ``~/.config/yaams/config.yaml`` in the
+  greenfield case.
+  """
+  canonical = canonical_yaams_config()
+  if canonical.is_file():
+    click.echo(f"\n+ yaams config already at {canonical}; reusing in place.")
+    return canonical
+
+  click.echo(f"\n. no yaams config at {canonical}.")
+  if not _yes("Generate one now from detected sources?", default=True):
+    click.echo("  skipped; you can run `mnem init` again after creating one.")
+    return None
+  canonical.parent.mkdir(parents=True, exist_ok=True)
+  canonical.write_text(_build_yaams_config(probes), encoding="utf-8")
+  click.echo(f"  wrote {canonical}")
+  return canonical
+
+
+def _resolve_ledger_config() -> Path | None:
+  canonical = canonical_ledger_config()
+  if canonical.is_file():
+    click.echo(f"+ cognitive-ledger config at {canonical}; reusing in place.")
+    return canonical
+  click.echo(
+    f". no cognitive-ledger config at {canonical}.\n"
+    "    hint: `ledger init --root <root>` to create one, then re-run `mnem init`."
+  )
+  return None
+
+
+def _resolve_owa_piggy_config() -> Path | None:
+  canonical = canonical_owa_piggy_config()
+  if canonical.is_file():
+    click.echo(f"+ owa-piggy config at {canonical}; reusing in place.")
+    return canonical
+  click.echo(
+    f". no owa-piggy config at {canonical}.\n"
+    "    hint: `owa-piggy setup --profile <alias> --email <addr>` to create one."
+  )
+  return None
+
+
 def run(as_json: bool, *, force: bool = False) -> int:
   if as_json:
     click.echo(
@@ -230,11 +265,14 @@ def run(as_json: bool, *, force: bool = False) -> int:
     )
     return 1
 
+  master = master_config_path()
+  data = data_root_default()
+
   click.echo(f"mnem init v{_mnem_version()}")
   click.echo("This wizard:")
   click.echo("  1. probes for ingest sources")
-  click.echo(f"  2. writes {_yaams_config_path()}")
-  click.echo(f"  3. uses {_data_dir()} as the data root (override with MNEM_HOME)")
+  click.echo(f"  2. writes {master}")
+  click.echo(f"  3. uses {data} as the data root (override with MNEM_HOME)")
   click.echo("  4. runs yaams setup, init-db, and ingest --dry-run")
   if not _yes("\nContinue?"):
     click.echo("Aborted.")
@@ -244,57 +282,44 @@ def run(as_json: bool, *, force: bool = False) -> int:
   probes = run_all()
   _print_probe_summary(probes)
 
-  # --- Pick the config we will hand to yaams --------------------------
-  # Three cases:
-  #   1. A standalone yaams config already exists at ~/.config/yaams/config.yaml.
-  #      Default is to reuse it in place. Mnem won't touch it.
-  #   2. No standalone config, but mnem has written one before. Keep unless
-  #      the user opts in to overwrite (or --force was passed).
-  #   3. Greenfield. Write a fresh config seeded from probes.
-  cfg_path = _yaams_config_path()
-  cfg_path.parent.mkdir(parents=True, exist_ok=True)
-  data = _data_dir()
+  # --- Resolve per-tool config paths ---------------------------------
+  config_dir().mkdir(parents=True, exist_ok=True)
   data.mkdir(parents=True, exist_ok=True)
 
-  existing_probe = next((p for p in probes if p.name == "existing_yaams_config" and p.enabled), None)
-  existing_cfg_path = Path(existing_probe.extras["path"]) if existing_probe else None
+  yaams_cfg = _resolve_yaams_config(probes, force=force)
+  ledger_cfg = _resolve_ledger_config()
+  owa_cfg = _resolve_owa_piggy_config()
 
-  if existing_cfg_path and existing_cfg_path != cfg_path:
-    click.echo(f"\nDetected existing yaams config at {existing_cfg_path}")
-    if existing_probe and "parse_note" in existing_probe.extras:
-      click.echo(f"  note: {existing_probe.extras['parse_note']}")
-    if _yes("Reuse this config in place (recommended)?", default=True):
-      cfg_path = existing_cfg_path
-      click.echo(f"Using {cfg_path}")
+  # --- Write master config -------------------------------------------
+  body = render_master(
+    version=_mnem_version(),
+    data_root=data,
+    yaams_config=yaams_cfg,
+    ledger_config=ledger_cfg,
+    owa_piggy_config=owa_cfg,
+  )
+  if master.is_file() and not force:
+    existing_body = master.read_text(encoding="utf-8")
+    if existing_body == body:
+      click.echo(f"\n{master} already up to date.")
     else:
-      click.echo("Generating a separate mnem-managed config.")
-      if cfg_path.is_file() and not force:
-        click.echo(f"Config already exists at {cfg_path}")
-        if not _yes("Overwrite?", default=False):
-          click.echo("Keeping existing mnem-managed config.")
-        else:
-          cfg_path.write_text(_build_yaams_config(probes), encoding="utf-8")
-          click.echo(f"  wrote {cfg_path} (seeded from {existing_cfg_path})")
+      click.echo(f"\nMaster config already exists at {master}")
+      if not _yes("Overwrite?", default=False):
+        click.echo("Keeping existing master config.")
       else:
-        cfg_path.write_text(_build_yaams_config(probes), encoding="utf-8")
-        click.echo(f"Wrote {cfg_path} (seeded from {existing_cfg_path})")
-  elif cfg_path.is_file() and not force:
-    click.echo(f"\nConfig already exists at {cfg_path}")
-    if not _yes("Overwrite?", default=False):
-      click.echo("Keeping existing config.")
-    else:
-      cfg_path.write_text(_build_yaams_config(probes), encoding="utf-8")
-      click.echo(f"  wrote {cfg_path}")
+        master.write_text(body, encoding="utf-8")
+        click.echo(f"  wrote {master}")
   else:
-    cfg_path.write_text(_build_yaams_config(probes), encoding="utf-8")
-    click.echo(f"\nWrote {cfg_path}")
+    master.write_text(body, encoding="utf-8")
+    click.echo(f"\nWrote {master}")
 
   # --- Run downstream setup ------------------------------------------
-  yaams = _which_or_warn("yaams")
-  if yaams:
-    _run_step("yaams setup (install spaCy models if needed)", [yaams, "setup", "--config", str(cfg_path)])
-    _run_step("yaams init-db", [yaams, "init-db", "--config", str(cfg_path)])
-    _run_step("yaams ingest --dry-run", [yaams, "ingest", "--dry-run", "--config", str(cfg_path)])
+  if yaams_cfg is not None:
+    yaams = _which_or_warn("yaams")
+    if yaams:
+      _run_step("yaams setup (install spaCy models if needed)", [yaams, "setup", "--config", str(yaams_cfg)])
+      _run_step("yaams init-db", [yaams, "init-db", "--config", str(yaams_cfg)])
+      _run_step("yaams ingest --dry-run", [yaams, "ingest", "--dry-run", "--config", str(yaams_cfg)])
 
   click.echo("\nDone. Suggested next commands:")
   click.echo("  $ mnem ingest")

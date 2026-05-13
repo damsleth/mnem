@@ -20,10 +20,16 @@ from mnem.cli import _yaams_config_env
 
 
 def _make_cfg(tmp_path: Path) -> Path:
-  cfg = tmp_path / "mnem" / "yaams" / "config.yaml"
-  cfg.parent.mkdir(parents=True)
-  cfg.write_text("db_path: /tmp/x.db\n")
-  return cfg
+  """Create both the master mnem config and the yaams config it points
+  at. Returns the yaams config path (the one `_yaams_config_env`
+  resolves and injects)."""
+  yaams_cfg = tmp_path / "yaams" / "config.yaml"
+  yaams_cfg.parent.mkdir(parents=True)
+  yaams_cfg.write_text("db_path: /tmp/x.db\n")
+  master = tmp_path / "mnem" / "config.yaml"
+  master.parent.mkdir(parents=True)
+  master.write_text(f"version: 1\nyaams_config: {yaams_cfg}\n")
+  return yaams_cfg
 
 
 def test_injects_yaams_config_for_query(monkeypatch, tmp_path: Path):

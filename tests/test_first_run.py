@@ -38,9 +38,9 @@ def test_ensure_config_returns_exit_4_when_config_missing(monkeypatch, tmp_path:
 
 def test_ensure_config_returns_none_when_config_exists(monkeypatch, tmp_path: Path):
   monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
-  cfg = tmp_path / "mnem" / "yaams" / "config.yaml"
+  cfg = tmp_path / "mnem" / "config.yaml"
   cfg.parent.mkdir(parents=True)
-  cfg.write_text("db_path: /tmp/x.db\n")
+  cfg.write_text("version: 1\nyaams_config: /tmp/x.yaml\n")
   assert _ensure_config(("query",)) is None
 
 
